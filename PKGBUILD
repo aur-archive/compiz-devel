@@ -1,0 +1,111 @@
+# Maintainer: Balló György <ballogyor+arch at gmail dot com>
+
+pkgname=compiz-devel
+_pkgname=compiz
+pkgver=0.9.8.6
+pkgrel=5
+pkgdesc="Composite manager for Aiglx and Xgl (development release)"
+arch=('i686' 'x86_64')
+url="https://launchpad.net/compiz"
+license=('MIT')
+depends=('protobuf' 'librsvg' 'libwnck' 'glibmm' 'metacity' 'python2-dbus' 'pygtk' 'hicolor-icon-theme' 'xdg-utils')
+makedepends=('cmake' 'libxslt' 'intltool' 'boost' 'pyrex' 'glu')
+conflicts=('ccsm' 'compiz-bcop' 'compizconfig-backend-gconf' 'compizconfig-python' 'compiz-core' 'compiz-decorator-gtk' 'compiz-fusion-plugins-extra' 'compiz-fusion-plugins-main' 'libcompizconfig')
+provides=("compiz=$pkgver")
+install=$_pkgname.install
+source=(https://launchpad.net/compiz/${pkgver%.*}/$pkgver/+download/$_pkgname-$pkgver.tar.bz2
+        http://pkgbuild.com/~bgyorgy/sources/$_pkgname-translations-20130310.tar.gz
+        http://pkgbuild.com/~bgyorgy/sources/ccsm-translations-20130310.tar.gz
+        boost-fix-build.patch
+        transparent-desktop-windows.patch
+        ubuntu-config.patch
+        fix-gschema.patch
+        default-plugins.patch
+        config)
+md5sums=('43f16a1990abb50fad00ff5e51cb98af'
+         '0a6d7abc738b77d82ffb3dd39eb40939'
+         'ca0e8a5b5b4363aa587fcb6022c4feec'
+         'f824bcb07583906602834c75562fa31b'
+         'bca303bc8a8700b4372555f7c32e3602'
+         '5b084c9d10236ca83edac1fe07a4c0d0'
+         'e72391ee27c82dc36ab80db8fa27d151'
+         '4215d60ee03fbba4632364645d93a006'
+         'a096c205c16594800c09414b9c181b91')
+
+build() {
+  cd "$srcdir/$_pkgname-$pkgver"
+
+  # Python2 fix
+  sed -i 's/COMMAND python/COMMAND python2/
+          s/PYTHON_EXECUTABLE python/PYTHON_EXECUTABLE python2/' compizconfig/compizconfig-python/CMakeLists.txt \
+                                                                 compizconfig/ccsm/CMakeLists.txt \
+                                                                 compizconfig/cmake/exec_setup_py_with_destdir.cmake
+  sed -i 's/python setup.py/python2 setup.py/' compizconfig/compizconfig-python/Makefile \
+                                               compizconfig/ccsm/Makefile
+
+  # Fix build with boost 1.53
+  patch -Np1 -i "$srcdir/boost-fix-build.patch"
+
+  # Add support for transparent desktop windows (required for nautilus 3.8)
+  patch -Np1 -i "$srcdir/transparent-desktop-windows.patch"
+
+  # Apply Ubuntu settings, because it fixes various problems
+  patch -Np1 -i "$srcdir/ubuntu-config.patch"
+
+  # Use internal gschema for terminal key setting
+  patch -Np1 -i "$srcdir/fix-gschema.patch"
+
+  # Install updated language files
+  rename $_pkgname- '' ../po/$_pkgname-*.po
+  mv -f -t po ../po/*
+  printf "%s\n" po/*.po | sed -e 's/po\///g' -e 's/\.po//g' >po/LINGUAS
+
+  # Install updated language files for ccsm
+  rename ccsm- '' ../compizconfig/ccsm/po/ccsm-*.po
+  mv -f -t compizconfig/ccsm/po ../compizconfig/ccsm/po/*
+  printf "%s\n" compizconfig/ccsm/po/*.po | sed -e 's/po\///g' -e 's/\.po//g' >compizconfig/ccsm/po/LINGUAS
+
+  [[ -d build ]] || mkdir build
+  cd build
+
+  cmake .. -DCMAKE_INSTALL_PREFIX=/usr \
+           -DCOMPIZ_BUILD_WITH_RPATH=FALSE \
+           -DCOMPIZ_DEFAULT_PLUGINS="ccp" \
+           -DCMAKE_BUILD_TYPE=Debug \
+           -DCOMPIZ_PACKAGING_ENABLED=TRUE \
+           -DUSE_GSETTINGS=ON \
+           -DCOMPIZ_DISABLE_PLUGIN_KDE=ON \
+           -DCOMPIZ_BUILD_TESTING=OFF \
+           -DUSE_KDE4=OFF \
+           -DUSE_GCONF=OFF
+  make
+}
+
+package() {
+  cd "$srcdir/$_pkgname-$pkgver/build"
+
+  make DESTDIR="$pkgdir" install
+
+  # Install keybindings files
+  mkdir -p "$pkgdir/usr/share/gnome-control-center/keybindings"
+  cp gtk/gnome/*.xml "$pkgdir/usr/share/gnome-control-center/keybindings/"
+
+  # Install wm-properties file
+  install -Dm644 gtk/gnome/compiz.desktop "$pkgdir/usr/share/gnome/wm-properties/compiz-wm.desktop"
+
+  # Install FindCompiz.cmake file
+  install -Dm644 "$srcdir/$_pkgname-$pkgver/cmake/FindCompiz.cmake" "$pkgdir/usr/share/cmake-2.8/Modules/FindCompiz.cmake"
+
+  # Install compizconfig configuration file
+  install -Dm644 "$srcdir/config" "$pkgdir/etc/compizconfig/config"
+
+  # Install licence file
+  install -Dm644 "$srcdir/$_pkgname-$pkgver/COPYING.MIT" "$pkgdir/usr/share/licenses/$pkgname/COPYING.MIT"
+
+  # Remove GConf schemas
+  rm -r "$pkgdir/usr/share/gconf"
+
+  # Set default plugins for Unity
+  cd "$pkgdir"
+  patch -Np1 -i "$srcdir/default-plugins.patch"
+}
